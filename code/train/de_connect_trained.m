@@ -6,63 +6,40 @@ function [Con,Wts,model,ws] = de_connect_trained(mSets, ct)
     % We'll use recursive calls into the system, to make this quicker.
     %   but we'll make sure NOT to call back into this code.
 
+
+    % Make sure!
+    guru_assert(length(ct.sigma) ~= 2 || diff(ct.sigma)==0, 'Canonical case: 2 sigmas, should be the same!');
+
     %%%%%%%%%%%%%%%%%
     % Set up model parameters & allocate space
     %%%%%%%%%%%%%%%%%
+    
+    % In order for other caching to happen, all props MUST be set before
+    % now.
 
-    if (~isfield(ct, 'dataset')),   ct.dataset     = 'uber'; end;
-    if (~isfield(ct, 'steps')),     ct.steps     = {[8 8 8 8 8] [1 1 1 1 1]}; end;
-    if (~isfield(ct, 'iters_per')), ct.iters_per = {ct.iters_per_step(1)*ones(size(ct.steps{1})) ...
-                                                    ct.iters_per_step(2)*ones(size(ct.steps{2}))}; end;
+    % Select the specified hemisphere
+    ct.iters_per = ct.iters_per{mSets.hemi};
+    ct.steps = ct.steps{mSets.hemi};
+    ct.sigma = ct.sigma(mSets.hemi);
+    
+    % Combine all settings into a single model
+    model    = guru_mergeStruct( mSets, ct );
+    model.ac = rmfield(model.ac, 'ct');
 
-    model.debug                = mSets.debug;
-
-    model.nConnPerHidden_Start = 2*mSets.nConns;
-    model.nConnPerHidden_End   = mSets.nConns;
-    model.distn                = mSets.distn;
-    model.mu                   = mSets.mu;
-    model.sigma                = max(mSets.sigma);
-    model.nHidden              = mSets.nHidden;
-    model.hpl                  = mSets.hpl;
-
-    % stim props
-    model.nInput               = mSets.nInput;
-    model.nOutput              = prod(model.nInput);
-    model.zscore               = isfield(model, 'zscore') && model.zscore;
-
-    ws.sz                      = mSets.nInput;
-    ws.dataset                 = ct.dataset;
-    ws.iters_per               = ct.iters_per{mSets.hemi};
-    ws.steps                   = ct.steps{mSets.hemi};
-    ws.npruning_loops          = ct.npruning_loops;
-    ws.prune_loc               = ct.ac.prune_loc;
-    ws.prune_strategy          = ct.ac.prune_strategy;
-    ws.keep_weights            = ct.keep_weights;%true;
-
-    model.ac            = ct.ac;        % get training args from ct
-    model.ac.debug      = mSets.ac.debug;
-    model.ac.randState  = mSets.ac.randState;
-    model.ac.errorType  = 2;
-    model.ac.zscore     = mSets.ac.zscore;
-    if (isfield(model.ac, 'EtaInitInit'))
-        model.ac.EtaInit    = model.ac.EtaInitInit/sqrt(ws.steps(1)); %lol
-    end;
-    model.ac.useBias    = 1;
+    % Add any additional properties
+    model.nOutput       = prod(model.nOutput);
     model.ac.continue   = true;
-    model.ac.tol        = mSets.ac.tol;
-    model.ac.minmax     = [];
 
-%    model.ac.noise_input= ct.ac.noise_input;
 
     %%%%%%%%%%%%%%%%%
     % Check if this connectivity profile has been cached
     %%%%%%%%%%%%%%%%%
 
     model.data.opt = mSets.data.opt; % for caching purposes only
-    model.ac.MaxIterations  = sum(ws.iters_per);
+    model.ac.MaxIterations  = sum(model.iters_per);
     model.nConns   = model.nConnPerHidden_End;
 
-    connFile       = de_GetOutFile(model, 'conn', ws);
+    connFile       = de_GetOutFile(model, 'conn');
 
     if (exist(connFile))
         fprintf('found cached connection');
@@ -72,14 +49,15 @@ function [Con,Wts,model,ws] = de_connect_trained(mSets, ct)
         if (isfield(model.ac, 'randState'))
             rand('seed', model.ac.randState);
             randn('seed', model.ac.randState);
+            fprintf('random seed: %d\n', model.ac.randState);
         end;
 
         %%%%%%%%%%%%%%%%%
         % Set up model parameters & allocate space
         %%%%%%%%%%%%%%%%%
 
-        for ii=1:length(ws.iters_per)
-            ws.filters{ii} = fspecial('gaussian', [ws.steps(min(end,ii)) ws.steps(min(end,ii))], 4);
+        for ii=1:length(model.iters_per)
+            ws.filters{ii} = fspecial('gaussian', [model.steps(min(end,ii)) model.steps(min(end,ii))], 4);
         end;
 
 
@@ -87,14 +65,14 @@ function [Con,Wts,model,ws] = de_connect_trained(mSets, ct)
             fprintf('\nCreating network...');
         end;
 
-        switch(ws.dataset)
+        switch(model.dataset)
             case {'c' 'cafe'    'young_bion_1981'},     [~, ws.train, ws.test] = de_MakeDataset('young_bion_1981',     '', '', mSets.data.opt);
-            case {'n' 'natimg'  'vanhateren'},          [~, ws.train, ws.test] = de_MakeDataset('vanhateren',          '', '', mSets.data.opt);
-            case {'s' 'sergent' 'sergent_1982'},        [~, ws.train, ws.test] = de_MakeDataset('sergent_1982',        '', '', mSets.data.opt);
+            case {'n' 'natimg'  'vanhateren'},          [~, ws.train, ws.test] = de_MakeDataset('vanhateren',          '100', '', mSets.data.opt);
+            case {'s' 'sergent' 'sergent_1982'},        [~, ws.train, ws.test] = de_MakeDataset('sergent_1982',        'sergent', '', mSets.data.opt);
             case {    'sf'      'christman_etal_1991'}, [~, ws.train, ws.test] = de_MakeDataset('christman_etal_1991', '', '', mSets.data.opt);
             case {'u' 'uber'},                          [~, ws.train, ws.test] = de_MakeDataset('uber',                'original', '', mSets.data.opt);
             case {'f' 'gratings'},                      [~, ws.train, ws.test] = de_MakeDataset('gratings',            '', '', mSets.data.opt);
-            otherwise,                                  error('dataset %s NYI', ws.dataset);
+            otherwise,                                  error('dataset %s NYI', model.dataset);
         end;
 
         ws.inPix      = prod(model.nInput);
@@ -128,11 +106,11 @@ function [Con,Wts,model,ws] = de_connect_trained(mSets, ct)
         % Train the model
         %%%%%%%%%%%%%%%%%
 
-        fprintf('\nTraining h=%d k=%d...\n', mSets.hemi, ws.steps(1));
+        fprintf('\nTraining h=%d k=%d...\n', mSets.hemi, model.steps(1));
 
 
-        for ii=1:length(ws.iters_per)
-            model.ac.MaxIterations = ws.iters_per(ii);
+        for ii=1:length(model.iters_per)
+            model.ac.MaxIterations = model.iters_per(ii);
 
             in2hu_w  = full(abs(model.ac.Weights(ws.inPix+1+[1:model.nHidden], 1:ws.inPix))); %input->hidden weight matrix
             if (ismember(10, model.debug))
@@ -142,20 +120,20 @@ function [Con,Wts,model,ws] = de_connect_trained(mSets, ct)
             if (ismember(10, model.debug))
                 fprintf('\nTraining for %d epochs [%d:%d of %d]:\n', ...
                         model.ac.MaxIterations, ...
-                        1+sum(ws.iters_per(1:ii-1)), ...
-                        sum(ws.iters_per(1:ii)), ...
-                        sum(ws.iters_per));
+                        1+sum(model.iters_per(1:ii-1)), ...
+                        sum(model.iters_per(1:ii)), ...
+                        sum(model.iters_per));
             end;
 
             % Filter the images
-            if (ii==1 || diff(ws.steps(ii+[-1 0]))~=0)
+            if (ii==1 || diff(model.steps(ii+[-1 0]))~=0)
                 %fprintf('[making filtered images]');
                 f = filt_imgs( ws.train.X, ws.train.nInput, ws.filters{ii} );
             end;
 
             %if (ii>1)
-            %    model.ac.EtaInit    = model.ac.EtaInit*ws.steps(ii)/ws.steps(ii-1);
-            %end;%ws.steps(1)*model.ac.EtaInitInit; %lol
+            %    model.ac.EtaInit    = model.ac.EtaInit*model.steps(ii)/model.steps(ii-1);
+            %end;%model.steps(1)*model.ac.EtaInitInit; %lol
             % Create training dataset from blurred images
             if (model.nConnPerHidden_End==model.nConnPerHidden_Start)
                 model.ac.lambda = 0;
@@ -164,7 +142,7 @@ function [Con,Wts,model,ws] = de_connect_trained(mSets, ct)
     %        model.minmax  = [];
     %        dset.train     = de_NormalizeDataset( ws.train, model);
     %        dset.test      = de_NormalizeDataset( ws.test, model);
-            dset          = struct('X', f, 'name',sprintf('k=%d',ws.steps(ii)));
+            dset          = struct('X', f, 'name',sprintf('k=%d',model.steps(ii)));
             dset          = de_NormalizeDataset(dset, model);
             X             = dset.X;               % Input vectors;  [pixels examples]
             Y             = dset.X(1:end-1,:);    % everything but the bias
@@ -185,14 +163,14 @@ function [Con,Wts,model,ws] = de_connect_trained(mSets, ct)
             if (model.nConnPerHidden_End==nConnPerHidden), continue; end;
 
             % Determine how many connections must go
-            reductRate     = exp(log(model.nConnPerHidden_End/nConnPerHidden)/(ws.npruning_loops-ii+1));
+            reductRate     = exp(log(model.nConnPerHidden_End/nConnPerHidden)/(model.npruning_loops-ii+1));
             nout = round( (1-reductRate) * nConnPerHidden * model.nHidden * 2 );
             nout = nout - mod(nout,2); % must be even, so as we remove hidden->input and hidden->output pairs
             guru_assert( ~isnan(nout), 'Failure to calculate # to prune; probably should have exited pruning loop earlier...' );
             guru_assert( (nConnCurr-nout)>=model.nConnPerHidden_End*model.nHidden*2, 'Don''t remove too many connections!!');
 
             % Select connections to query
-            switch (ws.prune_loc)
+            switch (model.prune_loc)
                 case 'input'
                     in2hu_c  = model.ac.Conn   (ws.inPix+1+[1:model.nHidden], 1:ws.inPix); %input->hidden connection matrix
                     in2hu_w  = model.ac.Weights(ws.inPix+1+[1:model.nHidden], 1:ws.inPix); %input->hidden weight matrix
@@ -203,7 +181,7 @@ function [Con,Wts,model,ws] = de_connect_trained(mSets, ct)
             end;
 
             % Create some metric for selecting weights
-            switch (ws.prune_strategy)
+            switch (model.prune_strategy)
                 case 'weights'
                     in2hu_a = in2hu_w;
 
@@ -308,7 +286,7 @@ function [Con,Wts,model,ws] = de_connect_trained(mSets, ct)
             % Report the maximum weight size removed
             w_out = in2hu_w(nzai(bcil));
             max_w_out = max(abs(w_out(:)));
-            if (strcmp(ws.prune_strategy, 'weights'))
+            if (strcmp(model.prune_strategy, 'weights'))
                 guru_assert(max_w_out == tv, 'Maximum weight removed should be equal to computed threshhold value.');
             end;
             if (ismember(10, model.debug))
@@ -360,7 +338,7 @@ function [Con,Wts,model,ws] = de_connect_trained(mSets, ct)
 
     %keyboard
 
-    ipd = de_StatsInterpatchDistance({model})
+    %ipd = de_StatsInterpatchDistance({model})
 
 
     %%%%%%%%%%%%%%%%%
@@ -369,7 +347,7 @@ function [Con,Wts,model,ws] = de_connect_trained(mSets, ct)
 
     Con = model.ac.Conn;
 
-    if (ws.keep_weights)
+    if (model.keep_weights)
         Wts = model.ac.Weights;
     elseif (nargout > 1)
         Wts = model.ac.WeightInitScale*guru_nnInitWeights(Con, model.ac.WeightInitType);

@@ -1,4 +1,4 @@
-function [Con,mu] = de_connector2D(sI,sH,hpl,numCon,distn,rds,sig,dbg,tol,weight_factor)
+function [Con,mu] = de_connector2D(sI,sH,hpl,numCon,distn,rds,sig,dbg,tol,weight_factor, want_fully_connected)
   %
   %This function is used to creat the connectivity matrix for the
   %  autoencoders based on a Gaussian distribution.
@@ -11,11 +11,22 @@ function [Con,mu] = de_connector2D(sI,sH,hpl,numCon,distn,rds,sig,dbg,tol,weight
   %  sH= # of hidden nodes
   %
   % Output:
-  %  Con
+  %  Con : connectivity matrix
+  %  mu : positions of the hidden units
   
+    MAX_CALLS = 200; %
+    
     if (~exist('dbg','var')), dbg=0; end;
     if (~exist('tol','var')), tol=0; end;
     if (~exist('weight_factor','var')), weight_factor = []; end;
+    if ~exist('want_fully_connected'), want_fully_connected = false; end;
+    
+    fake_zero = (sH==0);
+    if fake_zero
+       guru_assert(hpl==0);
+       sH = prod(sI);
+       hpl = 1;
+    end;
     
     %
     parts       = mfe_split('-',distn);
@@ -43,7 +54,7 @@ function [Con,mu] = de_connector2D(sI,sH,hpl,numCon,distn,rds,sig,dbg,tol,weight
           if (rds ~= 0.0), warning('Ignoring non-zero rds=%4.1f', rds); end;
         case {'normr', 'normre'}
         case {'full','fulle'}, opts={'nofill'};
-                      
+        case {'ipd','ipd-local'}, ipd = rds;  
         otherwise, error('Unknown distribution: %s', distn_name);
     end;
     
@@ -68,7 +79,20 @@ function [Con,mu] = de_connector2D(sI,sH,hpl,numCon,distn,rds,sig,dbg,tol,weight
 
                 % Sample based on given distribution and parameters
                 switch (distn_name)
-
+                    case {'ipd', 'ipd-local'}
+                      Xa = round(sort([mupos(mi,2):-ipd:1 mupos(mi,2):ipd:sI(2)]));
+                      Ya = round(sort([mupos(mi,1):-ipd:1 mupos(mi,1):ipd:sI(1)]));
+                      
+                      theta = 2*pi*rand; %really just need pi (half circle is enough; distn's are symmetric), but ...
+                      rm    = [cos(theta) -sin(theta); sin(theta) cos(theta)];
+                      error('ipd distribution NYI');
+                      mn    = mupos(mi,:);
+                      cv    = rm*[1.5*sig 0;0 sig/1.5]*rm';
+                      pdn   = zeros(sI);
+                      pdn(Ya,Xa) = 1;
+                      pdn   = pdn .* reshape(mvnpdf(X, mn, cv),sI(end:-1:1))';     %transform linear array to 2D
+                      pdn   = reshape(transpose(pdn),[numel(pdn) 1])./sum(pdn(:)); %transform back into expected linear array
+                      
                     case {'gam','gamma'}
                        r = gamrnd(k,theta,numCon,1); %shape, x.  As shape goes high and x goes low, interpatch distance decreases (less spread in points)
                        d = 2*pi*rand(size(r));
@@ -86,6 +110,7 @@ function [Con,mu] = de_connector2D(sI,sH,hpl,numCon,distn,rds,sig,dbg,tol,weight
                         mn   = mupos(mi,:);
                         cv   = [sig 0; 0 sig];
                         pdn  = mvnpdf(X, mn, cv);
+                        %keyboard
                         
                     case {'normeh'}
                         theta = randn*(pi/2/hpl) + (pi/hpl*(h-1));  % divide half-circle (we-re symmetric) into (hpl) parts; allow jitter within that slide (according to pi/hpl)
@@ -221,21 +246,32 @@ function [Con,mu] = de_connector2D(sI,sH,hpl,numCon,distn,rds,sig,dbg,tol,weight
     
     
     % See if any inputs/outputs are NOT connected
-    nNotCon = sum(~sum(halfCon,1)>0);
-
-    if (nNotCon/prod(sI) > tol)
-        
-        x      = dbstack();
-        nCalls = sum(strcmp(x(1).name, {x.name}));
-        if (nCalls >= 200)
-            error('Failed to connect network to ALL inputs/outputs after %d calls; quitting...', nCalls);
-        else
-            clear('halfCon', 'Con');
+    if want_fully_connected
+        nNotCon = sum(~sum(halfCon,1)>0);
+    
+        if (nNotCon/prod(sI) > tol)
+            
+            x      = dbstack();
+            nCalls = sum(strcmp(x(1).name, {x.name}));
+            if (nCalls >= MAX_CALLS)
+                Con = []; 
+                return;
+            end;
+            
+            if (dbg), fprintf('.'); end;
+    
+            % Recursive call if we're above some tolerance (here, 1%)
+            Con = de_connector2D(sI,sH,hpl,numCon,distn,rds,sig,dbg,tol);
+            if (nCalls==1 && isempty(Con))
+                error('Failed to connect network to ALL inputs/outputs after %d calls; quitting...', MAX_CALLS);
+            end;
         end;
-        
-        if (dbg), fprintf('.'); end;
-
-        % Recursive call if we're above some tolerance (here, 1%)
-        Con = de_connector2D(sI,sH,hpl,numCon,distn,rds,sig,dbg,tol);
+    end;
+     
+    if fake_zero
+        Con2 = zeros(2*inPix);
+        Con2(inPix+[1:inPix],1:inPix) = Con(inPix+[1:inPix],1:inPix);
+        Con2 = Con;
+        mu = [];
     end;
     

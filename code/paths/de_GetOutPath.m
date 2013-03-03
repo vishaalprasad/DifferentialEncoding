@@ -27,11 +27,45 @@ function outdir = de_GetOutPath(model, dirType)
     case {'datasets'}
         outdir = fullfile('~', 'datasets');
 
-    case {'conn'}
-            origString = de_GetOutPath(model, 'ac_p_base');
+    % Connections are stored to a directory based ONLY on its own properties,
+    %   NOTHING about how it will be used after the pruned connections are established
+    case 'conn_base'
+        % Make sure to select one of the settings given
+        if isfield(model, 'hemi') && iscell(model.iters_per), 
+            model.iters_per = model.iters_per{model.hemi};
+            model.steps     = model.steps{model.hemi};
+            model.sigma = model.sigma(model.hemi);
+        end;
+        
+        origString = '';
+
+        % Add conn-specific model settings
+        origString = [ origString ...
+                       sprintf('SG=%f,',   model.sigma), ...
+                       sprintf('NS=%d,',   model.nConnPerHidden_Start), ...
+                       sprintf('NE=%d,',   model.nConnPerHidden_End), ...
+                     ];
+
+        % Add workspace settings
+        origString = [ origString ...
+                       sprintf('DS=%s,',   model.dataset), ...
+                       sprintf('IP=[%s],', sprintf(' %d',model.iters_per)), ...
+                       sprintf('ST=[%s],', sprintf(' %d',model.steps)), ...
+                       sprintf('NP=%d,',   model.npruning_loops), ...
+                       sprintf('PL=%s,',   model.prune_loc), ...
+                       sprintf('PS=%s,',   model.prune_strategy), ...
+                       sprintf('KW=%d,',   model.keep_weights), ...
+                       sprintf('NK=%d,',   model.ac.nzc_ok), ...
+                       sprintf('OP=%s',    guru_cell2str(model.data.opt, '.')), ...
+                     ];
+                     
+                     
             hash       = hash_path(origString);
-            
-            outdir = fullfile(de_GetOutPath(model, 'cache'), 'conn', hash);
+            outdir     = hash;          
+
+    case {'conn'}
+            outdir = fullfile(de_GetOutPath(model, 'cache'), 'conn', de_GetOutPath(model, 'conn_base'));
+
 
     % Top-level output directory for trained models and analysis stats.
     %   sub-directories will be more specific
@@ -44,6 +78,7 @@ function outdir = de_GetOutPath(model, dirType)
         outdir = model.out.runspath;
       end;
 
+
     % Main output directory for analysis summaries and plots (i.e. human-readable!)
     case {'results', 'plot', 'summary', 'settings-map'}
       if (isempty(model))
@@ -54,30 +89,12 @@ function outdir = de_GetOutPath(model, dirType)
         outdir = model.out.resultspath;
       end;
 
-    case {'acn','pn'}
-       error('who is calling me like this?');
-%      origString = '';
-%      origString = [ origString ...
-%                     sprintf('DN=%s', sprintf('%s-', model.distn{:})), ...
-%                     sprintf('MU=%s', sprintf('%f-', model.mu(:))), ...
-%                     sprintf('SG=%s', sprintf('%f-', model.sigma(:))), ...
-%                     sprintf('AE=%f', model.ac.AvgError), ...
-%                     sprintf('MI=%d', model.ac.MaxIterations), ...
-%                     sprintf('AC=%f', model.ac.Acc), ...
-%                     sprintf('DC=%f', model.ac.Dec), ...
-%                     sprintf('EI=%f', model.ac.EtaInit), ...
-%                     sprintf('XF=%d', model.ac.XferFn), ...
-%                     sprintf('WT=%s', model.ac.WeightInitType) ];
-%      %hash = mfe_md5(origString);
-%      hash = hash_path(origString);%sprintf('%d', sum(origString.*[1:10:10*length(origString)]));
-%      outdir = fullfile(de_GetOutPath(model, 'data'), hash); %saving under data directory
 
     % Directory containing all trained models.
     %   should contain ALL [overall] AND [ac] model settings.
     case {'ac'}
         if (isfield(model,'uberpath'))
             outdir = model.uberpath;
-            %fprintf('[uber-path]');
         else
             % Ridiculous internal directory name needs to be unique, but shortened.
             %   That's what hashes are for!
@@ -88,6 +105,8 @@ function outdir = de_GetOutPath(model, dirType)
             % That was just the directory name; now prepend the base directory!
             outdir = fullfile(de_GetOutPath(model, 'runs'), hash); %saving under data directory
         end;
+
+
     case {'p'}
         origString = de_GetOutPath(model, 'ac_p_base');
         if (isfield(model, 'uberpath')) % don't confuse p for uber and non-uber cases
@@ -112,7 +131,8 @@ function outdir = de_GetOutPath(model, dirType)
           %origString = guru_fileparts(model.dataFile, 'filename'); %
 
           origString = [ 'opt=' guru_cell2str(model.data.opt, '.')];
-
+          %origString = ''; % options should be pasted on 
+          
           origString = [ origString ... % add on base model settings
                          sprintf('UBER=%d', isfield(model, 'uberpath')), ...
                          sprintf('DN=%s', sprintf('%s-', model.distn{:})), ... %if we call in based on a "full" mSets,
@@ -121,10 +141,10 @@ function outdir = de_GetOutPath(model, dirType)
                          sprintf('NH=%d', model.nHidden), ... % These are stamped elsewhere,
                          sprintf('HP=%d', model.hpl), ...     %   but just to be safe,
                          sprintf('NC=%d', model.nConns), ...  %   stamp them here too.
+                         sprintf('DE=%s', model.deType), ...  %   stamp them here too.
                          ];
 
           origString = [ origString ... % add on AC model settings
-                         sprintf('CT=%d', isfield(model.ac, 'ct')), ...
                          sprintf('NI=%d', model.ac.noise_input), ...
                          sprintf('WT=%s', model.ac.WeightInitType), ...
                          sprintf('WS=%f', model.ac.WeightInitScale), ...
@@ -140,11 +160,25 @@ function outdir = de_GetOutPath(model, dirType)
                          sprintf('PW=%f', model.ac.Pow), ...
                          sprintf('TL=%d', model.ac.tol), ...  %   stamp them here too.
                          sprintf('LB=%d', model.ac.lambda), ...
+                         sprintf('TS=%d', model.ac.ts), ...
                          sprintf('WL=[ %d %d ]', model.ac.wlim(1), model.ac.wlim(2)) ...
                         ];
 
+          % Pruning: the original model
+          if isfield(model.ac,'ct') % pruning study
+
+              % need to select
+              if ~isfield(model.ac.ct, 'hemi') && isfield(model, 'hemi')
+                  model.ac.ct.hemi = model.hemi;               
+              end;
+              
+              origString = [origString ...
+                            sprintf('CT=%s', de_GetOutPath(model.ac.ct, 'conn_base')) ...
+                           ];
+          end;
+
           if (isfield(model.ac, 'zscore'))
-              origString = sprintf('%s,ZS=%d', origString, model.ac.zscore);
+              origString = sprintf('%s,ZS=%f', origString, model.ac.zscore);
           end;
 
           outdir = origString; % bubble this back up as clear-text
