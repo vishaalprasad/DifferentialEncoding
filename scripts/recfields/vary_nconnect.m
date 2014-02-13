@@ -22,8 +22,9 @@ function vary_nconnect()
   wts_mean = zeros(0, 20, 20);
 
   % Circular
-  if (exist('vary_nconnect.mat'))
-      load('vary_nconnect.mat');
+  outfile = sprintf('%s.mat', mfilename());
+  if (exist(outfile,'file'))
+      load(outfile);
   else
       for ni=1:length(nin)
           [avg_mean(end+1,:),std_mean(end+1,:),std_std(end+1,:),wts_mean(end+1,:,:),pt,f(end+1)]=nn_2layer_processor(args{:}, 'nin', nin(ni));
@@ -46,6 +47,7 @@ function vary_nconnect()
   figure; plot(cpi, avg_mean', '.-');
   legend(lbls);
   xlabel('frequency (cycles per image)');
+  ylabel('average activity');
 
   % non-normalized
   figure; 
@@ -55,7 +57,7 @@ function vary_nconnect()
   set(gca,'xlim', [min(cpi)-0.01 max(cpi)+0.01], 'ylim', [0 1.05]);
   set(gca, 'FontSize', 16);
   xlabel('frequency (cycles per image)');
-  ylabel('output activity (linear xfer fn)');
+  ylabel('variance in output activity (linear xfer fn)');
   legend(lbls, 'Location', 'best', 'FontSize',16);
   
   % normalized
@@ -66,7 +68,7 @@ function vary_nconnect()
   set(gca,'xlim', [min(cpi)-0.01 max(cpi)+0.01], 'ylim', [0 1.05]);
   set(gca, 'FontSize', 16);
   xlabel('frequency (cycles per image)');
-  ylabel('output activity (normalized)');
+  ylabel('variance in output activity (normalized)');
   legend(lbls, 'Location', 'best', 'FontSize',14);
   
   %figure;
@@ -74,7 +76,7 @@ function vary_nconnect()
   %subplot(1,3,2); imagesc(squeeze(wts_mean(2,:,:)));
   %subplot(1,3,3); imshow(0.5+mfe_grating2d( 0.08, 0, pi/2, 0.5, 20, 20 ));
 
-  save('vary_nconnect.mat');
+  save(outfile);
   
 
 function [avg_mean, std_mean, std_std, wts_mean, p, f] = nn_2layer_processor(varargin)

@@ -1,21 +1,13 @@
 clear all variables; clear all globals;
 
-%%%%%%%%%%%%%%%%
-% Run the autoencoder & gather output
-%%%%%%%%%%%%%%%%%
 
-[args,opts] = kitterle_args( 'plots',{'hu-encodings', 'hu-output'}, 'stats', {'hu-encodings', 'hu-output'} );
+stats={'images','connectivity','ffts'};
+plots=stats;
 
-[~, tst_freq] = de_SimulatorUber('uber/original', 'kitterle_etal_1992/sf_mixed/recog_freq', opts, args);
-[~, tst_type] = de_SimulatorUber('uber/original', 'kitterle_etal_1992/sf_mixed/recog_type', opts, args);
+[args,opts] = uber_kitterle_args( 'runs', 10, 'plots',plots,'stats',stats );
+                           
+[~, tst_freq] = de_SimulatorUber('uber/natimg', 'kitterle_etal_1992/sf_mixed/recog_freq', opts, args);
+[~, tst_type] = de_SimulatorUber('uber/natimg', 'kitterle_etal_1992/sf_mixed/recog_type', opts, args);
 
-% Reconstitute into expected format
-ms.freq = tst_freq.models;
-ms.type = tst_type.models;
-ss.freq = tst_freq.stats;
-ss.type = tst_type.stats;
-mSets   = tst_freq.mSets;
+kitterle_interaction_analysis(tst_freq, tst_type, ms, ss);
 
-ss.group = de_StatsGroupBasicsKit( mSets, ms, ss );
-
-de_PlotsGroupBasicsKit( mSets, ms, ss );

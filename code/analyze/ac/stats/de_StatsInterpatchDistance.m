@@ -10,24 +10,32 @@ function [ipd] = de_StatsInterpatchDistance(models)
 % Output:
 % ti : # of training iterations
 
-  % Only makes sense for 2D
-  if (length(models{1}(1).nInput)~=2)
-      warning('Inter-Patch distance only implemented for 2D models.');
-      ipd = [];
-  end;
-  
   % Normalize the structure that we get (this is not the best place to do this...)  
   if (isstruct(models))
     models = mat2cell(models, size(models,1), ones(size(models,2),1));
   end;
-  
-  
   
   ipd.nn_dists = cell(length(models), 1);
   ipd.fc_dists = cell(length(models), 1);
   
   for ss=1:length(models)
       ms = models{ss};
+
+      % Validate
+      if isempty(ms)
+          warning('No models to calc stats for');
+          continue;
+
+      % Only makes sense for 2D
+      elseif (length(ms(1).nInput)~=2)
+          warning('Inter-Patch distance only implemented for 2D models.');
+          ipd = [];
+          return
+      end;
+
+
+
+
       if (~isfield(ms(1), 'ac')...              % Load weights 
        || ~isfield(ms(1).ac, 'Conn') ...
        || isempty(ms(1).ac.Conn))
@@ -84,7 +92,6 @@ function [ipd] = de_StatsInterpatchDistance(models)
             
               % Average distance from center
               fc_dists{mm,hui}(ci) = sqrt( (cx(ci)-mupos(hh,2)).^2 + (cy(ci)-mupos(hh,1)).^2);
-              % keyboard
 
               % Manual search for nearest neighbor
               for di=ci+1:length(cx)
@@ -110,10 +117,9 @@ function [ipd] = de_StatsInterpatchDistance(models)
                 end;
                 nn_dists{mm,hui} = []; %these will be removed
                 
-            elseif any(nn_dist(:)<1)
-                keyboard
-                
             else
+                guru_assert(all(nn_dist(:)>=1), 'nearest neighbor distance cannot be smaller than one!');
+                
                 %nn_dist = nn_dist(1:end-1,2:end); % dist is upper triangular; only off-diagonal elements
                 %                            % make sense.  Select only the comparisons that make sense.
                 nn_dists{mm,hui} = min(nn_dist);
@@ -122,8 +128,8 @@ function [ipd] = de_StatsInterpatchDistance(models)
           end;
       end;
       
-      ipd.nn_dists{ss} = nn_dists;
-      ipd.fc_dists{ss} = fc_dists;
+%      ipd.nn_dists{ss} = nn_dists;
+%      ipd.fc_dists{ss} = fc_dists;
       ipd.nearest_neighbor_mean(ss)  = mean(horzcat(nn_dists{:})); %inter-patch distance
       ipd.nearest_neighbor_std (ss)  = std (horzcat(nn_dists{:}));
       ipd.from_center_mean(ss)       = mean(horzcat(fc_dists{:}));     %average distance from center
@@ -159,9 +165,21 @@ function [ipd] = de_StatsInterpatchDistance(models)
       ipd.top25.from_center_mean(ss)       = mean(horzcat(fc_dists_closest{:}));      %average distance from center
       ipd.top25.from_center_std (ss)       = std (horzcat(fc_dists_closest{:}));
   end;
-  
-%  disp('inter-patch distance:');
-%  ipd.mean'    %inter-patch distance
-%  disp('average distance from center:');
-%  ipd.mean2   %average distance from center
-  
+
+  if (~isfield(ipd,'nearest_neighbor_mean'))
+     ipd = [];
+
+  elseif (length(models)==2)
+    fprintf('[Total  ]\t%5.2f%% diff to nearest neighbor;\t%5.2f%% diff from center\n', ...
+            100*diff(ipd.nearest_neighbor_mean)      /mean(ipd.nearest_neighbor_mean), ...
+            100*diff(ipd.from_center_mean)           /mean(ipd.from_center_mean));
+    fprintf('[Top  5%%]\t%5.2f%% diff to nearest neighbor;\t%5.2f%% diff from center\n', ...
+            100*diff(ipd.top5.nearest_neighbor_mean) /mean(ipd.top5.nearest_neighbor_mean), ...
+            100*diff(ipd.top5.from_center_mean)      /mean(ipd.top5.from_center_mean));
+    fprintf('[Top 10%%]\t%5.2f%% diff to nearest neighbor;\t%5.2f%% diff from center\n', ...
+            100*diff(ipd.top10.nearest_neighbor_mean)/mean(ipd.top10.nearest_neighbor_mean), ...
+            100*diff(ipd.top10.from_center_mean)     /mean(ipd.top10.from_center_mean));
+    fprintf('[Top 25%%]\t%5.2f%% diff to nearest neighbor;\t%5.2f%% diff from center\n', ...
+            100*diff(ipd.top25.nearest_neighbor_mean)/mean(ipd.top25.nearest_neighbor_mean), ...
+            100*diff(ipd.top25.from_center_mean)     /mean(ipd.top25.from_center_mean));
+  end;
